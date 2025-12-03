@@ -1,28 +1,17 @@
-# DenyIP Plugin for Traefik
+# denyip Traefik Plugin
 
-Middleware to deny requests based on IP address. Supports IPv4 and IPv6 addresses in single IP and CIDR notation.
+Blocks requests from configured IPs or CIDR ranges.
 
-## Installation
+## Config Example
+
 ```yaml
-experimental:
-  plugins:
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: denyip
+spec:
+  plugin:
     denyip:
-      moduleName: github.com/intaacopilot/DenyIP/denyIpPlugin
-      version: v1.0.0
-```
-
-## Configuration
-```yaml
-http:
-  middlewares:
-    denyip:
-      plugin:
-        denyip:
-          ipDenyList:
-            - "192.168.1.0/24"
-            - "10.0.0.1"
-```
-
-## Usage
-
-Add to your router in traefik configuration.
+      IPDenyList:
+        - "1.2.3.4"
+        - "10.0.0.0/8"

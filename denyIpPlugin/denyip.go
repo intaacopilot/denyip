@@ -1,4 +1,4 @@
-package denyip
+package denyIpPlugin
 
 import (
 	"context"
@@ -6,30 +6,33 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	// "net/http/httptest"
 	"strings"
 )
 
-// Checker allows to check that addresses are in a denied IPs.
 type Checker struct {
 	denyIPs    []*net.IP
 	denyIPsNet []*net.IPNet
 }
 
-// Config the plugin configuration.
 type Config struct {
-	IPDenyList []string
+	IPDenyList []string `json:"IPDenyList,omitempty"`
 }
 
-// DenyIP plugin.
 type denyIP struct {
 	next    http.Handler
 	checker *Checker
 	name    string
 }
 
-// New creates a new DenyIP plugin.
+func CreateConfig() *Config {
+	return &Config{}
+}
+
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
+	if config == nil || len(config.IPDenyList) == 0 {
+		return nil, errors.New("IPDenyList cannot be empty")
+	}
+
 	checker, err := NewChecker(config.IPDenyList)
 	if err != nil {
 		return nil, err
@@ -44,9 +47,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 func (a *denyIP) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	reqIPAddr := a.GetRemoteIP(req)
-	reqIPAddrLenOffset := len(reqIPAddr) - 1
 
-	for i := reqIPAddrLenOffset; i >= 0; i-- {
+	for i := len(reqIPAddr) - 1; i >= 0; i-- {
 		isBlocked, err := a.checker.Contains(reqIPAddr[i])
 		if err != nil {
 			fmt.Printf("Error checking IP: %v\n", err)
@@ -62,7 +64,6 @@ func (a *denyIP) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	a.next.ServeHTTP(rw, req)
 }
 
-// GetRemoteIP returns a list of IPs that are associated with this request.
 func (a *denyIP) GetRemoteIP(req *http.Request) []string {
 	var ipList []string
 
@@ -70,33 +71,28 @@ func (a *denyIP) GetRemoteIP(req *http.Request) []string {
 	xffs := strings.Split(xff, ",")
 
 	for i := len(xffs) - 1; i >= 0; i-- {
-		xffsTrim := strings.TrimSpace(xffs[i])
-		xffsTrim = strings.Trim(xffsTrim, "[]")
-
-		if len(xffsTrim) > 0 {
-			ipList = append(ipList, xffsTrim)
+		ip := cleanIP(xffs[i])
+		if ip != "" {
+			ipList = append(ipList, ip)
 		}
 	}
 
-	ip, _, err := net.SplitHostPort(req.RemoteAddr)
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
 	if err != nil {
-		remoteAddrTrim := strings.TrimSpace(req.RemoteAddr)
-		if len(remoteAddrTrim) > 0 {
-			remoteAddrTrim = strings.Trim(remoteAddrTrim, "[]")
-			ipList = append(ipList, remoteAddrTrim)
-		}
+		ipList = append(ipList, cleanIP(req.RemoteAddr))
 	} else {
-		ipTrim := strings.TrimSpace(ip)
-		if len(ipTrim) > 0 {
-			ipTrim = strings.Trim(ipTrim, "[]")
-			ipList = append(ipList, ipTrim)
-		}
+		ipList = append(ipList, cleanIP(host))
 	}
 
 	return ipList
 }
 
-// NewChecker builds a new Checker given a list of CIDR-Strings to denied IPs.
+func cleanIP(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, "[]")
+	return s
+}
+
 func NewChecker(deniedIPs []string) (*Checker, error) {
 	if len(deniedIPs) == 0 {
 		return nil, errors.New("no denied IPs provided")
@@ -116,28 +112,26 @@ func NewChecker(deniedIPs []string) (*Checker, error) {
 		if ipAddr := net.ParseIP(ipMask); ipAddr != nil {
 			checker.denyIPs = append(checker.denyIPs, &ipAddr)
 		} else {
-			return nil, fmt.Errorf("parsing denied IPs %s: invalid IP or CIDR format", ipMask)
+			return nil, fmt.Errorf("invalid IP/CIDR format: %s", ipMask)
 		}
 	}
 
 	return checker, nil
 }
 
-// Contains checks if provided address is in the denied IPs.
 func (ip *Checker) Contains(addr string) (bool, error) {
-	if len(addr) == 0 {
-		return false, errors.New("empty IP address")
+	if addr == "" {
+		return false, errors.New("empty IP")
 	}
 
-	ipAddr, err := parseIP(addr)
-	if err != nil {
-		return false, fmt.Errorf("unable to parse address: %s: %w", addr, err)
+	ipAddr := net.ParseIP(addr)
+	if ipAddr == nil {
+		return false, fmt.Errorf("invalid IP: %s", addr)
 	}
 
 	return ip.ContainsIP(ipAddr), nil
 }
 
-// ContainsIP checks if provided address is in the denied IPs.
 func (ip *Checker) ContainsIP(addr net.IP) bool {
 	for _, deniedIP := range ip.denyIPs {
 		if deniedIP.Equal(addr) {
@@ -153,15 +147,3 @@ func (ip *Checker) ContainsIP(addr net.IP) bool {
 
 	return false
 }
-
-func parseIP(addr string) (net.IP, error) {
-	addr = strings.Trim(addr, "[]")
-
-	userIP := net.ParseIP(addr)
-	if userIP == nil {
-		return nil, fmt.Errorf("unable to parse IP from address %s", addr)
-	}
-
-	return userIP, nil
-}
-
