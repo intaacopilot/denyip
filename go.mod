@@ -1,4 +1,4 @@
-module github.com/intaacopilot/DenyIP
+module github.com/intaacopilot/denyip
 
 go 1.21
 
