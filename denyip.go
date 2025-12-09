@@ -1,4 +1,4 @@
-package denyIpPlugin
+package denyip
 
 import (
 	"context"
